@@ -1,4 +1,4 @@
-# Enterprise Hub-and-Spoke Network with Secure Inspection & Hybrid Connectivity Simulation via Terraform
+# 🤝 Enterprise Hub-and-Spoke Network with Secure Inspection & Hybrid Connectivity Simulation via Terraform
 
 ### 🏢 1. Project Overview:
 When transitioning from traditional network engineering to Cloud Engineering, the biggest shift is moving from static hardware/cables to Infrastructure as Code (IaC).
