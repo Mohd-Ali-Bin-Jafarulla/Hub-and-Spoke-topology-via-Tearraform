@@ -95,7 +95,7 @@ provider "aws" {
 ### 2️⃣ `Variables.tf` (The Input Framework):
 
 ```hcl
-# 1. Metadata Variable Declarations
+# 1.Metadata Variable Declarations
 
 variable "project_name" {type   = string }
 variable "environment" {type = string}
@@ -144,45 +144,48 @@ spoke2_private_subnet_cidr = "10.2.1.0/24"
 
 ### 4️⃣ `Main.tf` (The Core Infrastructure Logic):
 ```hcl
-# 1. Deploy Central Hub Infrastructure(VPC HUB Module)
-
+#  1. Deploy Central Hub Infrastructure
 module "hub_network" {
-  source = "../../modules/vpc_hub"
-  hub_vpc_cidr  = var.hub_cidr
-  public_subnet_cidr    = var.hub_public_subnet_cidr
+  source             = "../../modules/vpc_hub"
+  hub_vpc_cidr       = var.hub_cidr
+  public_subnet_cidr = var.hub_public_subnet_cidr
 }
 
-# 2. Deploy Transit Gateway Router Mechanism(Trasit Gatway Module)
+#  2. Deploy Workload Spoke VPC 1 (Created BEFORE TGW attachments)
+module "spoke_network_1" {
+  source              = "../../modules/vpc_spoke"
+  spoke_name          = "${var.project_name}-spoke1"
+  spoke_vpc_cidr      = var.spoke1_cidr
+  private_subnet_cidr = var.spoke1_private_subnet_cidr
+  tgw_id              = module.transit_gateway.tgw_id
+}
 
+# 3. Deploy Workload Spoke VPC 2 (Created BEFORE TGW attachments)
+module "spoke_network_2" {
+  source              = "../../modules/vpc_spoke"
+  spoke_name          = "${var.project_name}-spoke2"
+  spoke_vpc_cidr      = var.spoke2_cidr
+  private_subnet_cidr = var.spoke2_private_subnet_cidr
+  tgw_id              = module.transit_gateway.tgw_id
+}
+
+# 4. Deploy Transit Gateway Router Mechanism
 module "transit_gateway" {
-  source = "../../modules/transit_gatway"
-  hub_vpc_id    = module.hub_network.vpc_id
-
-  vpc_attachments   = {
-    hub = module.hub_network.vpc_id
+  source     = "../../modules/transit_gateway"
+  hub_vpc_id = module.hub_network.vpc_id
+  
+  vpc_attachments = {
+    hub     = module.hub_network.vpc_id
     spoke_1 = module.spoke_network_1.vpc_id
     spoke_2 = module.spoke_network_2.vpc_id
-    }
-}
+  }
 
-# 3. Deploy Workload Spoke VPC 1(VPC Spoke Module)
-
-module "spoke_network_1" {
-    source = "../../modules/vpc_spoke"
-    spoke_name  = "${var.project_name}-spoke-1"
-    spoke_vpc_cidr  =   var.spoke1_cidr
-    private_subnet_cidr = var.spoke1_private_subnet_cidr
-    tgw_id  =   module.transit_gateway.tgw_id
-}
-
-# 4. Deploy Workload Spoke VPC 2(VPC Spoke Module)
-
-module "spoke_network_2" {
-  source = "../../modules/vpc_spoke"
-  spoke_name ="${var.project_name}-spoke-2"
-  spoke_vpc_cidr    = var.spoke2_cidr
-  private_subnet_cidr   = var.spoke2_private_subnet_cidr
-  tgw_id    = module.transit_gateway.tgw_id
+  
+  subnet_ids = {
+    hub     = [module.hub_network.public_subnet_id]
+    spoke_1 = [module.spoke_network_1.private_subnet_id]
+    spoke_2 = [module.spoke_network_2.private_subnet_id]
+  }
 }
 ```
 ### 5️⃣ `outputs.tf` (The Post-Deployment Print):
@@ -238,7 +241,7 @@ resource "aws_vpc" "hub" {
 # Internet Gateway for public routing
 
 resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc_hub.id
+  vpc_id = aws_vpc.hub.id
   tags = {Name  = "hub-igw"}
 }
 
@@ -272,11 +275,11 @@ resource "aws_nat_gateway" "nat" {
 # Public Route Table mapping outbound traffic straight to the Internet
 
 resource "aws_route_table" "public" {
-  vpc_id = aws.vpc.hub.id
+  vpc_id = aws_vpc.hub.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw
+    gateway_id = aws_internet_gateway.igw.id
   }
 
   tags = {Name  =   "hub-public-rt"}
@@ -299,6 +302,7 @@ variable "public_subnet_cidr" {
   type        = string
   description = "CIDR block allocated for Hub Public Subnet"
 }
+
 ```
 
 ### 3️⃣ `outputs.tf` (VPC_hub Child Module):
@@ -306,6 +310,10 @@ variable "public_subnet_cidr" {
 output "vpc_id" {
   value       = aws_vpc.hub.id
   description = "The ID of the generated Hub VPC"
+}
+
+output "public_subnet_id" {
+  value = aws_subnet.public.id
 }
 ```
 
@@ -330,7 +338,7 @@ resource "aws_vpc" "spoke" {
 # Private Subnet for application hosting
 
 resource "aws_subnet" "private" {
-  vpc_id = aws.vpc.spoke.id
+  vpc_id = aws_vpc.spoke.id
   cidr_block = var.private_subnet_cidr
   tags = {Name="${var.spoke_name}-private-subnet"}
 }
@@ -352,6 +360,7 @@ resource "aws_route_table_association" "private" {
   subnet_id = aws_subnet.private.id
   route_table_id = aws_route_table.private.id
 }
+
 ```
 
 ### 2️⃣ `Variables.tf` (VPC_spoke Child Module):
@@ -381,6 +390,10 @@ output "vpc_id" {
   value = aws_vpc.spoke.id
   description = "ID of the generated Spoke VPC"
 }
+
+output "private_subnet_id" {
+  value = aws_subnet.private.id
+}
 ```
 
 ### 🎛️ Part C: The Transit Gateway Module `(modules/transit_gateway/)`:
@@ -404,16 +417,14 @@ resource "aws_ec2_transit_gateway" "tgw" {
 # Dynamic iterator mapping VPC attachments directly to the central router loop
 
 resource "aws_ec2_transit_gateway_vpc_attachment" "attachments" {
-  for_each           = var.vpc.attachments
+  for_each           = var.vpc_attachments
   transit_gateway_id = aws_ec2_transit_gateway.tgw.id
   vpc_id             = each.value
 
 
 # Discovers and binds to an active subnet group automatically per VPC
 
-subnet_ids  =   [
-    element(data.aws_subnet.lookup[each.key].ids,0)
-]
+subnet_ids = var.subnet_ids[each.key]
 
 tags    =   {Name   ="tgw-attachment-${each.key}"}
 }
@@ -439,6 +450,11 @@ variable "hub_vpc_id" {
 variable "vpc_attachments" {
   type = map(string)
   description = "Map configuration tracking names and associated network IDs"
+}
+
+variable "subnet_ids" {
+  type = map(list(string))
+  description = "Map of subnet IDs per VPC for attachments"
 }
 ```
 
