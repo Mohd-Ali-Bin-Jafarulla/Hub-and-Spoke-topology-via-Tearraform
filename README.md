@@ -16,6 +16,9 @@ The Spoke VPCs: These house your actual applications. They are completely privat
 
 The Transit Gateway (TGW): Acts as a cloud router. If an instance in Spoke 1 needs to download a security patch from the internet, its traffic goes: Spoke 1 Private Subnet ➡️ Transit Gateway ➡️ Hub VPC NAT Gateway ➡️ Internet Gateway ➡️ Out to the Internet.
 
+<img width="1408" height="768" alt="diag" src="https://github.com/user-attachments/assets/7b6c1ab8-ea16-4487-8d13-9d73874cd08b" />
+
+
 ---
 ### 💻 3. Prerequisites & Workspace Setup
 
